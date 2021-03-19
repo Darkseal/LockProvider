@@ -41,11 +41,15 @@ namespace Ryadel.Components.Threading
         {
             InnerSemaphore semaphore;
             if (lockDictionary.TryGetValue(idToUnlock, out semaphore))
+            {
                 semaphore.Release();
+                if (!semaphore.HasWaiters && lockDictionary.TryRemove(idToUnlock, out semaphore))
+                    semaphore.Dispose();
+            }
         }
     }
 
-    public class InnerSemaphore
+    public class InnerSemaphore : IDisposable
     {
         private SemaphoreSlim _semaphore;
         private int _waiters;
@@ -72,9 +76,14 @@ namespace Ryadel.Components.Threading
         {
             _waiters--;
             _semaphore.Release();
-            if (_waiters == 0)
+        }
+
+        public void Dispose()
+        {
+            if (_semaphore != null)
                 _semaphore.Dispose();
         }
+        public bool HasWaiters { get { return _waiters > 0; } }
     }
 
     public class LazyConcurrentDictionary<TKey, TValue>
@@ -105,6 +114,13 @@ namespace Ryadel.Components.Threading
             value = (success) ? lazyResult.Value : default(TValue);
             return success;
         }
+
+        public bool TryRemove(TKey key, out TValue value)
+        {
+            Lazy<TValue> lazyResult;
+            var success = _concurrentDictionary.TryRemove(key, out lazyResult);
+            value = (success) ? lazyResult.Value : default(TValue);
+            return success;
+        }
     }
 }
-

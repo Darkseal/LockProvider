@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,7 +15,7 @@ namespace Ryadel.Components.Threading
     /// </summary>
     public class LockProvider<T>
     {
-        static readonly ConcurrentDictionary<T, InnerSemaphore> lockDictionary = new ConcurrentDictionary<T, InnerSemaphore>();
+        static readonly LazyConcurrentDictionary<T, InnerSemaphore> lockDictionary = new LazyConcurrentDictionary<T, InnerSemaphore>();
 
         public LockProvider() { }
 
@@ -75,4 +76,35 @@ namespace Ryadel.Components.Threading
                 _semaphore.Dispose();
         }
     }
+
+    public class LazyConcurrentDictionary<TKey, TValue>
+    {
+        private readonly ConcurrentDictionary<TKey, Lazy<TValue>> _concurrentDictionary;
+
+        public LazyConcurrentDictionary()
+        {
+            _concurrentDictionary = new ConcurrentDictionary<TKey, Lazy<TValue>>();
+        }
+
+        public TValue GetOrAdd(TKey key, TValue value)
+        {
+            var lazyResult = _concurrentDictionary.GetOrAdd(key, k => new Lazy<TValue>(() => value, LazyThreadSafetyMode.ExecutionAndPublication));
+            return lazyResult.Value;
+        }
+
+        public TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
+        {
+            var lazyResult = _concurrentDictionary.GetOrAdd(key, k => new Lazy<TValue>(() => valueFactory(k), LazyThreadSafetyMode.ExecutionAndPublication));
+            return lazyResult.Value;
+        }
+
+        public bool TryGetValue(TKey key, out TValue value)
+        {
+            Lazy<TValue> lazyResult;
+            var success = _concurrentDictionary.TryGetValue(key, out lazyResult);
+            value = (success) ? lazyResult.Value : default(TValue);
+            return success;
+        }
+    }
 }
+

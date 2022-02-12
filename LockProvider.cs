@@ -15,7 +15,7 @@ namespace Ryadel.Components.Threading
     /// </summary>
     public class LockProvider<T>
     {
-        static readonly LazyConcurrentDictionary<T, InnerSemaphore> lockDictionary = new LazyConcurrentDictionary<T, InnerSemaphore>();
+        static readonly LazyConcurrentDictionary<T, InnerSemaphore> LockDictionary = new LazyConcurrentDictionary<T, InnerSemaphore>();
 
         public LockProvider() { }
 
@@ -25,7 +25,7 @@ namespace Ryadel.Components.Threading
         /// <param name="idToLock">the unique ID to perform the lock</param>
         public void Wait(T idToLock)
         {
-            lockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1)).Wait();
+            LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1)).Wait();
         }
 
         /// <summary>
@@ -34,16 +34,15 @@ namespace Ryadel.Components.Threading
         /// <param name="idToLock">the unique ID to perform the lock</param>
         public async Task WaitAsync(T idToLock)
         {
-            await lockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1)).WaitAsync();
+            await LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1)).WaitAsync();
         }
 
         public void Release(T idToUnlock)
         {
-            InnerSemaphore semaphore;
-            if (lockDictionary.TryGetValue(idToUnlock, out semaphore))
+            if (LockDictionary.TryGetValue(idToUnlock, out var semaphore))
             {
                 semaphore.Release();
-                if (!semaphore.HasWaiters && lockDictionary.TryRemove(idToUnlock, out semaphore))
+                if (!semaphore.HasWaiters && LockDictionary.TryRemove(idToUnlock, out semaphore))
                     semaphore.Dispose();
             }
         }
@@ -51,7 +50,7 @@ namespace Ryadel.Components.Threading
 
     public class InnerSemaphore : IDisposable
     {
-        private SemaphoreSlim _semaphore;
+        private readonly SemaphoreSlim _semaphore;
         private int _waiters;
 
         public InnerSemaphore(int initialCount, int maxCount)
@@ -80,10 +79,9 @@ namespace Ryadel.Components.Threading
 
         public void Dispose()
         {
-            if (_semaphore != null)
-                _semaphore.Dispose();
+            _semaphore?.Dispose();
         }
-        public bool HasWaiters { get { return _waiters > 0; } }
+        public bool HasWaiters => _waiters > 0;
     }
 
     public class LazyConcurrentDictionary<TKey, TValue>
@@ -109,17 +107,15 @@ namespace Ryadel.Components.Threading
 
         public bool TryGetValue(TKey key, out TValue value)
         {
-            Lazy<TValue> lazyResult;
-            var success = _concurrentDictionary.TryGetValue(key, out lazyResult);
-            value = (success) ? lazyResult.Value : default(TValue);
+            var success = _concurrentDictionary.TryGetValue(key, out var lazyResult);
+            value = (success) ? lazyResult.Value : default;
             return success;
         }
 
         public bool TryRemove(TKey key, out TValue value)
         {
-            Lazy<TValue> lazyResult;
-            var success = _concurrentDictionary.TryRemove(key, out lazyResult);
-            value = (success) ? lazyResult.Value : default(TValue);
+            var success = _concurrentDictionary.TryRemove(key, out var lazyResult);
+            value = (success) ? lazyResult.Value : default;
             return success;
         }
     }

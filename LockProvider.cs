@@ -1,7 +1,4 @@
-using System;
 using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Ryadel.Components.Threading
 {
@@ -29,12 +26,82 @@ namespace Ryadel.Components.Threading
         }
 
         /// <summary>
+        /// Blocks the current thread (according to the given ID) until it can enter the LockProvider
+        /// </summary>
+        /// <param name="idToLock">the unique ID to perform the lock</param>
+        /// <param name="millisecondsTimeout"></param>
+        public bool Wait(T idToLock, int millisecondsTimeout)
+        {
+            var semaphore = LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1));
+            if (!semaphore.Wait(millisecondsTimeout))
+            {
+                if (!semaphore.HasWaiters && LockDictionary.TryRemove(idToLock, out semaphore))
+                    semaphore.Dispose();
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Blocks the current thread (according to the given ID) until it can enter the LockProvider
+        /// </summary>
+        /// <param name="idToLock">the unique ID to perform the lock</param>
+        /// <param name="millisecondsTimeout"></param>
+        /// <param name="token"></param>
+        public bool Wait(T idToLock, int millisecondsTimeout, CancellationToken token)
+        {
+            var semaphore = LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1));
+            if (!semaphore.Wait(millisecondsTimeout, token))
+            {
+                if (!semaphore.HasWaiters && LockDictionary.TryRemove(idToLock, out semaphore))
+                    semaphore.Dispose();
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Asynchronously puts thread to wait (according to the given ID) until it can enter the LockProvider
         /// </summary>
         /// <param name="idToLock">the unique ID to perform the lock</param>
         public async Task WaitAsync(T idToLock)
         {
             await LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1)).WaitAsync();
+        }
+
+        /// <summary>
+        /// Asynchronously puts thread to wait (according to the given ID) until it can enter the LockProvider
+        /// </summary>
+        /// <param name="idToLock">the unique ID to perform the lock</param>
+        /// <param name="millisecondsTimeout"></param>
+        public async Task<bool> WaitAsync(T idToLock, int millisecondsTimeout)
+        {
+            var semaphore = LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1));
+            if (!await semaphore.WaitAsync(millisecondsTimeout))
+            {
+                if (!semaphore.HasWaiters && LockDictionary.TryRemove(idToLock, out semaphore))
+                    semaphore.Dispose();
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Asynchronously puts thread to wait (according to the given ID) until it can enter the LockProvider
+        /// </summary>
+        /// <param name="idToLock">the unique ID to perform the lock</param>
+        /// <param name="millisecondsTimeout"></param>
+        /// <param name="token"></param>
+        public async Task<bool> WaitAsync(T idToLock, int millisecondsTimeout, CancellationToken token)
+        {
+            var semaphore = LockDictionary.GetOrAdd(idToLock, new InnerSemaphore(1, 1));
+            if (!await semaphore.WaitAsync(millisecondsTimeout, token))
+            {
+                if (!semaphore.HasWaiters && LockDictionary.TryRemove(idToLock, out semaphore))
+                    semaphore.Dispose();
+                return false;
+            }
+            return true;
         }
 
         public void Release(T idToUnlock)
@@ -61,20 +128,76 @@ namespace Ryadel.Components.Threading
 
         public void Wait()
         {
-            _waiters++;
+            Interlocked.Increment(ref _waiters);
             _semaphore.Wait();
+        }
+
+        public bool Wait(int millisecondsTimeout)
+        {
+            Interlocked.Increment(ref _waiters);
+            if (!_semaphore.Wait(millisecondsTimeout))
+            {
+                Interlocked.Decrement(ref _waiters);
+                return false;
+            }
+            return true;
+        }
+
+        public void Wait(CancellationToken token)
+        {
+            Interlocked.Increment(ref _waiters);
+            _semaphore.Wait(token);
+        }
+
+        public bool Wait(int millisecondsTimeout, CancellationToken token)
+        {
+            Interlocked.Increment(ref _waiters);
+            if (!_semaphore.Wait(millisecondsTimeout, token))
+            {
+                Interlocked.Decrement(ref _waiters);
+                return false;
+            }
+            return true;
         }
 
         public async Task WaitAsync()
         {
-            _waiters++;
+            Interlocked.Increment(ref _waiters);
             await _semaphore.WaitAsync();
+        }
+
+        public async Task<bool> WaitAsync(int millisecondsTimeout)
+        {
+            Interlocked.Increment(ref _waiters);
+            if (!await _semaphore.WaitAsync(millisecondsTimeout))
+            {
+                Interlocked.Decrement(ref _waiters);
+                return false;
+            }
+            return true;
+        }
+
+        public async Task WaitAsync(CancellationToken token)
+        {
+            Interlocked.Increment(ref _waiters);
+            await _semaphore.WaitAsync(token);
+        }
+
+        public async Task<bool> WaitAsync(int millisecondsTimeout, CancellationToken token)
+        {
+            Interlocked.Increment(ref _waiters);
+            if (!await _semaphore.WaitAsync(millisecondsTimeout, token))
+            {
+                Interlocked.Decrement(ref _waiters);
+                return false;
+            }
+            return true;
         }
 
         public void Release()
         {
-            _waiters--;
             _semaphore.Release();
+            Interlocked.Decrement(ref _waiters);
         }
 
         public void Dispose()
@@ -108,14 +231,14 @@ namespace Ryadel.Components.Threading
         public bool TryGetValue(TKey key, out TValue value)
         {
             var success = _concurrentDictionary.TryGetValue(key, out var lazyResult);
-            value = (success) ? lazyResult.Value : default;
+            value = success ? lazyResult.Value : default;
             return success;
         }
 
         public bool TryRemove(TKey key, out TValue value)
         {
             var success = _concurrentDictionary.TryRemove(key, out var lazyResult);
-            value = (success) ? lazyResult.Value : default;
+            value = success ? lazyResult.Value : default;
             return success;
         }
     }
